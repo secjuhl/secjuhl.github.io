@@ -1,4 +1,5 @@
 ---
+layout: default
 title: Dirty Pipe Analysis
 permalink: /dirtypipe/
 ---
