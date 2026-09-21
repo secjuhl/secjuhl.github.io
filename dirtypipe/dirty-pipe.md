@@ -5,7 +5,7 @@ permalink: /dirtypipe/
 ---
 This will be a short blog post covering the CVE-2022-0847, also known as the "Dirty Pipe".
 
-This was inspired by the post at https://dirtypipe.cm4all.com/. I was reading alongside the 5.16.10 source code for this.
+This was inspired by the post at [original Dirty Pipe write-up](https://dirtypipe.cm4all.com/). I was reading alongside the 5.16.10 source code for this.
 
 I will try to cover some code snippets that made this "click" for me.
 
@@ -29,7 +29,7 @@ The vulnerability comes into play during splice.
 ssize_t splice(int fd_in, off_t *_Nullable off_in,
                       int fd_out, off_t *_Nullable off_out,
                       size_t size, unsigned int flags);
-In this vulnerability, splice assigns the struct page from the target file descriptor at fd_in to the fd_out file descriptor. This happens during https://elixir.bootlin.com/linux/v5.16.10/source/lib/iov_iter.c#L420.
+In this vulnerability, splice assigns the struct page from the target file descriptor at fd_in to the fd_out file descriptor. This happens during [iov_iter.c at line 420](https://elixir.bootlin.com/linux/v5.16.10/source/lib/iov_iter.c#L420).
 This leaves the pipe_buffer referencing the memory that represents the file data.
 
 Below is a backtrace, stopped in the referenced path. As observed in the source code, the pipe_buffer that has the page structure assigned, is at no point cleared for any flags.
@@ -62,10 +62,10 @@ Below is a backtrace, stopped in the referenced path. As observed in the source 
     flags=flags@entry=0x0) at fs/splice.c:1144
 ```
 The lifetime of a pipe object, can be explained as. The pipe is written to, buf->len is increased, and if we read from it offset is incremented by the amount that we read, while buf->len is decremented based on iov_iter_count. If we've read all data, then the kernel considers the pipe object emptied, and so we move onto the next pipe object. Once all pipe objects have been fully emptied, we move back to the start of the objects, and start from the beginning.
-This is shown at, the tail being incremented: https://elixir.bootlin.com/linux/v5.16.10/source/fs/pipe.c#L321
+This is shown at, the tail being incremented: [pipe.c at line 321](https://elixir.bootlin.com/linux/v5.16.10/source/fs/pipe.c#L321)
 After splice and emptying the pipe buffers, if you now try to write to the pipe the pipe will be referencing the first pipe_buffer object. Of course the conditions at line 455 of pipe.c must also be met, the size of the data we write cannot be page boundary, as it will fail the & (PAGE_SIZE - 1)  check.
-Source: https://elixir.bootlin.com/linux/v5.16.10/source/fs/pipe.c#L457
-The head being incremented, resulting in indexing the first pipe_buffer object: https://elixir.bootlin.com/linux/v5.16.10/source/lib/iov_iter.c#L424
-was_empty is a simple boolean check: https://elixir.bootlin.com/linux/v5.16.10/source/include/linux/pipe_fs_i.h#L134
+Source: [pipe.c at line 457](https://elixir.bootlin.com/linux/v5.16.10/source/fs/pipe.c#L457)
+The head being incremented, resulting in indexing the first pipe_buffer object: [iov_iter.c at line 424](https://elixir.bootlin.com/linux/v5.16.10/source/lib/iov_iter.c#L424)
+was_empty is a simple boolean check: [pipe_fs_i.h at line 134](https://elixir.bootlin.com/linux/v5.16.10/source/include/linux/pipe_fs_i.h#L134)
 In this case, if all buffs are emptied and we're starting over this will not equal true, making us pass this condition if we have exhausted all our pipe_buffers accurately, allowing attackers to write arbitrary data to files through a logical error which forgets to clear the flags of the pipe_buffer.
 This is the first analysis, I'll be trying to get better at covering them, documenting them, and even posting some exploits that I make for CVEs I can find.
